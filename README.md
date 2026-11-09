@@ -1,204 +1,241 @@
 # Evarti Camera Rental
 
-Evarti Camera Rental is an internal, responsive web app for managing camera
-rentals at Evarti's Cafe and Event locations. It gives the owner and cashiers a
-single place to create rental transactions, calculate charges, print thermal
-receipts, and review transaction history. The interface is designed for phones,
-tablets, and desktop screens.
+Aplikasi web internal untuk mengelola penyewaan kamera Evarti di lokasi **Cafe** dan **Event**. Owner dan kasir dapat mencatat penyewa, membuat transaksi, menerima pembayaran tunai atau QRIS DANA, mencetak struk thermal, serta melihat riwayat dan laporan pendapatan. Antarmuka menggunakan bahasa Indonesia dan menyesuaikan layar ponsel, tablet, serta desktop.
 
-This is an operations tool for Evarti staff, not a public customer booking
-website. Customers do not book or pay through the site.
+Pemesanan dan pembayaran dilakukan melalui staf Evarti; aplikasi ini digunakan untuk pencatatan operasional.
 
-## What it does
+## Fitur
 
-- **Role-based staff access:** Owner, Cashier 1, and Cashier 2 sign in with
-  separate accounts. Cashier 1 is assigned to Cafe, Cashier 2 to Event, and the
-  owner can choose a location.
-- **Camera catalog:** Owners can add, edit, deactivate, reactivate, and delete
-  cameras, update their one- and two-hour rental prices, and upload camera
-  photos. Cashiers see active products only.
-- **Rental transactions:** Create a receipt with one or more cameras, individual
-  rental durations, and manual pricing for rentals longer than two hours. The
-  app calculates end times, totals, cash change, and validates prices on the
-  server.
-- **Add-on catalog:** Select optional property items, photographer packages,
-  photo prints, and file-transfer methods. Owners can change add-on names and
-  prices, deactivate options, add new options, or delete them. File-transfer
-  options are initially free.
-- **Receipts:** Preview, print, and reprint customer receipts on 58 mm thermal
-  paper, or print an admin order copy. Selected add-ons and their prices appear
-  on the receipt.
-- **Transaction history:** Cashiers can access their own transactions; owners
-  can review all transactions, verify QRIS payments, void transactions, and
-  review business reports.
-- **Reports:** Owners can view daily, weekly, and monthly summaries and download
-  a PDF report.
-- **Data snapshots:** Product names and prices are saved with each transaction,
-  so later catalog edits or deletions do not change existing receipts.
+- **Akun staf:** login owner dan dua kasir dengan sesi cookie HttpOnly selama 8 jam, proteksi CSRF, dan pembatasan percobaan login.
+- **Dashboard:** ringkasan transaksi dan pendapatan hari ini, status pembayaran, serta aktivitas transaksi sesuai akun yang masuk.
+- **Katalog kamera:** owner dapat menambah, mengubah, mengaktifkan, menonaktifkan, dan menghapus kamera; mengatur tarif 1 dan 2 jam; serta mengunggah foto. Kasir hanya melihat kamera aktif.
+- **Transaksi beberapa kamera:** satu transaksi dapat memuat 1–20 kamera berbeda dengan durasi masing-masing. Tarif manual berlaku untuk durasi lebih dari 2 jam dan kurang dari 24 jam. Jam selesai mengikuti durasi kamera terlama; harga dan total divalidasi kembali oleh backend.
+- **Data penyewa:** nama dan nomor WhatsApp wajib, nomor pager opsional, serta pilihan jaminan tanpa jaminan, foto, atau nomor ID. Nomor ID dan foto jaminan tidak ditampilkan pada struk.
+- **Add-on katalog:** properti, fotografer, print foto, dan pemindahan file. Owner dapat mengelola nama, harga, dan statusnya. Perubahan disimpan melalui tombol **Simpan katalog add-on**.
+- **Layanan manual:** tambahkan satu add-on dengan nama dan harga khusus per transaksi, termasuk layanan gratis. Layanan ini tersimpan bersama transaksi tanpa masuk ke katalog.
+- **Pembayaran:** tunai dengan perhitungan kembalian, atau QRIS DANA yang diverifikasi manual oleh kasir pembuat transaksi atau owner.
+- **Struk thermal 58 mm:** pratinjau, pilihan struk pelanggan atau admin, cetak melalui dialog browser, serta cetak ulang transaksi lunas. Antarmuka mencantumkan printer Rongta RPP02N sebagai pilihan.
+- **Riwayat:** pencarian nomor struk, nama, atau WhatsApp; filter lokasi, tanggal, dan kasir untuk owner; serta tombol void dengan alasan pada antarmuka owner.
+- **Laporan owner:** rekap harian, mingguan, dan bulanan; pendapatan menurut metode pembayaran, lokasi, dan kasir; kamera terlaris; serta unduhan PDF. Pendapatan hanya menghitung transaksi lunas.
+- **Snapshot dan audit:** nama dan harga kamera maupun add-on disalin ke transaksi agar struk lama tetap konsisten ketika katalog berubah. Tarif manual, layanan manual, verifikasi QRIS, void, dan pencetakan struk dicatat dalam audit log yang tersedia melalui API owner.
 
-### QRIS payments
+### Akun dan lokasi
 
-QRIS payments are recorded and verified manually. An official DANA QR asset is
-not included, so the app does not generate or display a fake payment QR code.
+| Akun | Username | Lokasi transaksi | Password awal dari environment |
+| --- | --- | --- | --- |
+| Owner | `owner` | Dapat memilih Cafe atau Event | `OWNER_PASSWORD` |
+| Kasir 1 | `kasir1` | Cafe | `CASHIER1_PASSWORD` |
+| Kasir 2 | `kasir2` | Event | `CASHIER2_PASSWORD` |
 
-## Technology
+Kasir hanya dapat membaca transaksi miliknya. Owner dapat membaca seluruh transaksi. Backend menetapkan lokasi kasir berdasarkan username.
 
-- **Frontend:** React 18, Vite, and Lucide icons
-- **Backend:** Node.js, Express, and MySQL (`mysql2`)
-- **Validation:** Zod
-- **API tests:** Node.js Test Runner and Supertest
+### Status pembayaran dan nomor struk
 
-## Requirements
+| Status | Keterangan |
+| --- | --- |
+| `paid` | Pembayaran tunai tersimpan atau QRIS sudah diverifikasi; struk dapat dicetak |
+| `pending_verification` | QRIS menunggu konfirmasi manual; struk belum dapat dicetak |
+| `void` | Transaksi dibatalkan dan dikecualikan dari pendapatan |
 
-- Node.js 20 or newer
-- npm
+QRIS belum terhubung ke payment gateway. Aplikasi menampilkan instruksi menggunakan QRIS statis resmi Evarti; aset QR pembayaran tidak disertakan.
 
-## Run locally
+Nomor struk menggunakan format `CAF-YYYYMMDD-001` untuk Cafe dan `EVT-YYYYMMDD-001` untuk Event, dengan urutan per lokasi dan tanggal. Tanggal nomor struk dan pengelompokan laporan menggunakan zona waktu `Asia/Jakarta`.
 
-From the repository root, create the backend environment file:
+## Teknologi
+
+| Bagian | Teknologi |
+| --- | --- |
+| Frontend | React 18, Vite 6, Lucide React, CSS |
+| Backend | Node.js, Express 4, Zod |
+| Database utama | MySQL melalui `mysql2/promise`, tabel InnoDB dan charset `utf8mb4` |
+| SQLite | `better-sqlite3` untuk dukungan database lama, migrasi, dan pengujian API |
+| Autentikasi | `bcryptjs`, sesi tersimpan di database, cookie HttpOnly, CSRF |
+| Upload dan PDF | Multer, PDFKit |
+| Pengujian | Node.js Test Runner dan Supertest |
+| Pengelolaan proyek | npm workspaces dan Concurrently |
+
+## Menjalankan secara lokal
+
+### 1. Persyaratan
+
+- Node.js **20 atau lebih baru**, sesuai `engines` di `package.json`.
+- npm yang mendukung workspaces.
+- Server MySQL yang berjalan dan akun untuk membuat database serta memberi izin pengguna aplikasi.
+
+Jalankan seluruh perintah npm berikut dari root repositori.
+
+### 2. Siapkan database MySQL
+
+Masuk ke MySQL menggunakan akun administrator:
+
+```sh
+mysql -u root -p
+```
+
+Buat database dan pengguna aplikasi. Ganti password contoh sebelum menjalankan SQL:
+
+```sql
+CREATE DATABASE evarti CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'evarti'@'127.0.0.1' IDENTIFIED BY 'GANTI_DENGAN_PASSWORD_DATABASE';
+GRANT ALL PRIVILEGES ON evarti.* TO 'evarti'@'127.0.0.1';
+```
+
+Jika memakai MySQL terkelola atau database yang sudah tersedia, gunakan host, nama database, pengguna, dan izin yang sesuai. Backend membuat tabel saat startup, tetapi database/schema harus tersedia terlebih dahulu. Akun aplikasi memerlukan izin membuat dan mengubah tabel selain membaca dan menulis data.
+
+### 3. Atur environment
+
+Salin template backend ke root repositori:
 
 ```sh
 cp back-end/.env.example .env
 ```
 
-Edit `.env` before starting the app:
+Edit `.env`:
 
-- Set `SESSION_SECRET` to a random value of at least 32 characters. For example:
+- Sesuaikan `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_USER`, `MYSQL_PASSWORD`, dan `MYSQL_DATABASE` dengan database yang disiapkan.
+- Gunakan `DATABASE_CLIENT=mysql`.
+- Isi `SESSION_SECRET` dengan nilai acak minimal 32 karakter. Salah satu cara membuatnya:
 
   ```sh
   openssl rand -base64 32
   ```
 
-- Set unique passwords of at least 12 characters for `OWNER_PASSWORD`,
-  `CASHIER1_PASSWORD`, and `CASHIER2_PASSWORD`.
-- Do not commit `.env` or share its contents.
+- Ganti `OWNER_PASSWORD`, `CASHIER1_PASSWORD`, dan `CASHIER2_PASSWORD` dengan password masing-masing minimal 12 karakter.
 
-Install dependencies and start both the API and frontend:
+Nilai contoh `SESSION_SECRET` dan password akun yang diawali `change-this-` ditolak saat startup. Simpan kredensial di `.env` dan jangan commit file tersebut.
+
+### 4. Instal dan jalankan
 
 ```sh
 npm install
 npm run dev
 ```
 
-Open the frontend URL shown by Vite (usually
-[`http://localhost:5173`](http://localhost:5173)). The API runs at
-[`http://localhost:3000`](http://localhost:3000), and Vite proxies frontend API
-requests to it.
+Perintah ini menjalankan backend dan frontend bersamaan:
 
-The initial login usernames are:
+| Layanan | Alamat default |
+| --- | --- |
+| Frontend | [http://localhost:5173](http://localhost:5173) |
+| Backend API | [http://127.0.0.1:3000](http://127.0.0.1:3000) |
+| Health check | [http://127.0.0.1:3000/api/health](http://127.0.0.1:3000/api/health) |
 
-| Role | Username | Password environment variable |
-|---|---|---|
-| Owner | `owner` | `OWNER_PASSWORD` |
-| Cashier 1 | `kasir1` | `CASHIER1_PASSWORD` |
-| Cashier 2 | `kasir2` | `CASHIER2_PASSWORD` |
+Ikuti alamat yang ditampilkan Vite jika port frontend sedang digunakan. Vite meneruskan request `/api` ke `http://localhost:3000`. Backend mendengarkan pada `127.0.0.1`; jika port API diubah, sesuaikan juga proxy di `Front-end/vite.config.js`.
 
-The backend creates its MySQL tables and seeds the initial camera and add-on
-catalogs on first launch. Changing password variables after accounts have been
-initialized does not change existing account passwords.
+Saat inisialisasi database baru, backend membuat tabel, tiga akun staf, katalog kamera awal, dan katalog add-on awal. Seed saat ini mencakup **14 kamera** dan **13 add-on**; opsi pemindahan file memiliki tarif awal berbayar.
 
-The default add-ons are inserted only when the first accounts are created.
-Existing catalogs, including deleted choices or an empty catalog, are preserved
-on restart. After editing add-on names, prices, or availability, click
-**Simpan katalog add-on** to save the changes to the database.
+Password environment hanya digunakan untuk pembuatan akun awal. Mengubahnya setelah akun tersimpan tidak mengubah password akun yang sudah ada. Katalog add-on awal hanya dimasukkan ketika akun pertama dibuat, sehingga perubahan dan penghapusan add-on tetap tersimpan setelah restart.
 
-### Run frontend and backend separately
-
-Run these commands in separate terminals from the repository root:
+Untuk menjalankan layanan secara terpisah, gunakan dua terminal:
 
 ```sh
+# Terminal 1
 npm run dev:backend
+```
+
+```sh
+# Terminal 2
 npm run dev:frontend
 ```
 
-The frontend development server proxies API calls to `http://localhost:3000`.
-Set `VITE_API_URL` in `Front-end/.env` only when the API is hosted on a
-different origin.
+## Konfigurasi
 
-## Tests and production build
+Backend membaca `.env` di root repositori terlebih dahulu. Jika tidak tersedia, backend membaca `back-end/.env`. Environment proses yang sudah diatur mengambil prioritas atas nilai dari file.
 
-Run the backend API tests:
+| Variabel | Kegunaan | Default / ketentuan |
+| --- | --- | --- |
+| `NODE_ENV` | Mode aplikasi | `development` |
+| `PORT` | Port backend | `3000` |
+| `DATABASE_CLIENT` | Pilihan database | `mysql`; juga mendukung `sqlite` |
+| `MYSQL_HOST` | Host MySQL | Wajib untuk MySQL |
+| `MYSQL_PORT` | Port MySQL | `3306` |
+| `MYSQL_USER` | Pengguna MySQL | Wajib untuk MySQL |
+| `MYSQL_PASSWORD` | Password pengguna MySQL | Wajib untuk MySQL |
+| `MYSQL_DATABASE` | Nama database/schema yang sudah tersedia | Wajib untuk MySQL |
+| `MYSQL_SSL` | Mengaktifkan TLS koneksi MySQL | `false` |
+| `DATABASE_PATH` | Lokasi file ketika menggunakan SQLite | `./.data/evarti.sqlite`, relatif terhadap direktori kerja backend |
+| `SESSION_SECRET` | Secret untuk hash token sesi | Wajib, acak, minimal 32 karakter |
+| `FRONTEND_ORIGIN` | Origin frontend yang diizinkan CORS; dapat dipisahkan koma | `http://localhost:5173` |
+| `COOKIE_SECURE` | Cookie sesi hanya dikirim melalui HTTPS | `false`; wajib `true` pada production |
+| `OWNER_PASSWORD` | Password awal owner | Wajib, minimal 12 karakter |
+| `CASHIER1_PASSWORD` | Password awal Kasir 1 | Wajib, minimal 12 karakter |
+| `CASHIER2_PASSWORD` | Password awal Kasir 2 | Wajib, minimal 12 karakter |
 
-```sh
-npm test
-```
+Frontend menyediakan template `Front-end/.env.example` dengan variabel `VITE_API_URL`. Untuk development dengan proxy Vite, biarkan nilainya kosong. Jika perlu menunjuk origin API secara eksplisit, salin template ke `Front-end/.env` dan isi dengan origin API, tanpa akhiran `/api`. Nilai ini diterapkan saat Vite berjalan atau saat build.
 
-Build the frontend:
+## Perintah pengembangan dan build
 
-```sh
-npm run build
-```
+| Perintah dari root | Fungsi |
+| --- | --- |
+| `npm run dev` | Menjalankan backend dan frontend bersamaan |
+| `npm run dev:backend` | Menjalankan backend |
+| `npm run dev:frontend` | Menjalankan Vite development server |
+| `npm test` | Menjalankan pengujian API backend |
+| `npm run test:coverage --workspace evarti-rental-backend` | Menjalankan pengujian dengan laporan coverage |
+| `npm run build` | Membuat frontend production di `Front-end/dist/` |
+| `npm run preview --workspace evarti-rental-frontend` | Melihat hasil build frontend secara lokal |
+| `npm run start --workspace evarti-rental-backend` | Menjalankan backend untuk konfigurasi deployment |
 
-## Configuration
+Pengujian API menggunakan SQLite sementara dan direktori upload sementara. Cakupannya mencakup login, pemisahan akses kasir, beberapa kamera dalam satu transaksi, validasi harga dan WhatsApp, add-on katalog/manual, persistensi katalog, QRIS, privasi jaminan, void, dan laporan PDF. Pengujian ini tidak memverifikasi koneksi MySQL production.
 
-The backend reads `.env` from the repository root, or from `back-end/.env` if a
-root `.env` is not present.
+Build frontend hanya menghasilkan berkas statis; backend tetap dijalankan sebagai proses terpisah. Untuk production, gunakan HTTPS, `NODE_ENV=production`, `COOKIE_SECURE=true`, dan `FRONTEND_ORIGIN` sesuai domain frontend. Gunakan reverse proxy untuk melayani frontend dan `/api` dalam satu origin. Cookie sesi menggunakan `SameSite=Strict`, sehingga penempatan frontend dan API pada situs berbeda perlu memperhitungkan pembatasan cookie browser.
 
-| Variable | Purpose | Default |
-|---|---|---|
-| `NODE_ENV` | Runtime mode | `development` |
-| `PORT` | API port | `3000` |
-| `DATABASE_CLIENT` | Database driver (`mysql` or `sqlite`) | `mysql` |
-| `DATABASE_PATH` | SQLite file, when using `DATABASE_CLIENT=sqlite` | `./.data/evarti.sqlite` |
-| `MYSQL_HOST` | MySQL server hostname | Required |
-| `MYSQL_PORT` | MySQL server port | `3306` |
-| `MYSQL_USER` | MySQL username | Required |
-| `MYSQL_PASSWORD` | MySQL password | Required |
-| `MYSQL_DATABASE` | Existing MySQL database/schema name | Required |
-| `MYSQL_SSL` | Enable TLS for the MySQL connection | `false` |
-| `SESSION_SECRET` | Random session secret, at least 32 characters | Required |
-| `FRONTEND_ORIGIN` | Allowed frontend origin(s), comma-separated | `http://localhost:5173` |
-| `COOKIE_SECURE` | Send session cookies only over HTTPS | `false` |
-| `OWNER_PASSWORD` | Initial owner password | Required |
-| `CASHIER1_PASSWORD` | Initial Cashier 1 password | Required |
-| `CASHIER2_PASSWORD` | Initial Cashier 2 password | Required |
+Panduan pemindahan VPS, backup, restore MySQL, Nginx, PM2, serta migrasi data tersedia di [README-hosting.md](README-hosting.md).
 
-For production, use HTTPS, set `NODE_ENV=production` and `COOKIE_SECURE=true`,
-use strong credentials and a random session secret, and set `FRONTEND_ORIGIN`
-to the deployed frontend domain. If the frontend and API use different origins,
-set `VITE_API_URL` in `Front-end/.env` and allow the frontend origin in the
-backend configuration.
+## Penyimpanan dan migrasi data
 
-## Project structure
+### Data yang perlu dicadangkan
 
-```text
-.
-├── Front-end/
-│   ├── public/evarti-logo.png
-│   └── src/
-│       ├── services/api.js
-│       ├── App.jsx
-│       └── styles.css
-├── back-end/
-│   ├── src/
-│   │   ├── config/
-│   │   ├── middleware/
-│   │   ├── routes/
-│   │   ├── utils/
-│   │   ├── app.js
-│   │   ├── db.js
-│   │   └── server.js
-│   └── tests/
-├── PRD-evarti.md
-├── README-hosting.md
-├── package.json
-└── README.md
-```
+- Database MySQL: `users`, `sessions`, `cameras`, `addons`, `receipt_sequences`, `transactions`, `transaction_items`, `transaction_addons`, dan `audit_logs`.
+- Foto kamera: `back-end/uploads/cameras/`.
+- Foto jaminan: `back-end/uploads/private/`.
+- Konfigurasi backend dan frontend yang digunakan untuk menjalankan aplikasi.
 
-MySQL data and uploaded files contain operational data. Back them up
-appropriately before deploying or moving the application. Set `DATABASE_CLIENT=sqlite`
-only when temporarily running the legacy SQLite database.
+Nama file upload disimpan sebagai referensi di database. Backup database perlu disertai folder `back-end/uploads/` agar foto tetap tersedia. Add-on manual tersimpan di `transaction_addons`, sedangkan urutan nomor struk tersimpan di `receipt_sequences`.
 
-### Move existing SQLite data to MySQL
+Upload menerima JPG, PNG, atau WebP dengan pemeriksaan signature file. Batas foto kamera **3 MB** dan foto jaminan **2 MB**. Foto jaminan diakses melalui endpoint terautentikasi oleh owner atau kasir pembuat transaksi.
 
-Create an empty MySQL database, configure its connection variables in `.env`,
-then run the migration with the actual SQLite file path:
+### Migrasi SQLite lama ke MySQL
+
+Hentikan aplikasi, buat backup database SQLite beserta upload, lalu siapkan database MySQL kosong dan konfigurasikan koneksinya di `.env`. Jalankan migrasi **sebelum startup backend** agar database tujuan belum terisi seed:
 
 ```sh
 npm run migrate:sqlite --workspace evarti-rental-backend -- /absolute/path/to/evarti.sqlite
 ```
 
-The migration validates SQLite foreign keys and refuses to import into MySQL
-tables that already contain rows. It leaves the SQLite file untouched. Stop the
-application during migration, retain a backup, and use the MySQL configuration
-for normal application startup.
+Script membaca SQLite tanpa mengubahnya, memeriksa kelengkapan sembilan tabel dan relasi foreign key, membuat tabel MySQL tanpa seed, serta menolak impor jika tabel tujuan sudah berisi data. Seluruh data diimpor dalam satu transaksi database. Salin folder upload secara terpisah jika berpindah server, lalu jalankan aplikasi dengan `DATABASE_CLIENT=mysql`.
+
+SQLite lama masih dapat dijalankan dengan `DATABASE_CLIENT=sqlite` dan `DATABASE_PATH` yang sesuai; penggunaan normal proyek ini menggunakan MySQL.
+
+## Struktur proyek
+
+```text
+.
+├── Front-end/
+│   ├── public/evarti-logo.png
+│   ├── src/
+│   │   ├── services/api.js       # Request API, cookie sesi, dan token CSRF
+│   │   ├── App.jsx               # Halaman dan alur aplikasi
+│   │   ├── main.jsx
+│   │   └── styles.css            # Tampilan responsif dan cetak struk
+│   ├── .env.example
+│   └── vite.config.js
+├── back-end/
+│   ├── scripts/migrate-sqlite-to-mysql.js
+│   ├── src/
+│   │   ├── config/env.js
+│   │   ├── middleware/           # Autentikasi, CSRF, peran, dan upload
+│   │   ├── routes/               # Auth, kamera, add-on, transaksi, laporan, audit
+│   │   ├── utils/                # Validasi transaksi, WhatsApp, dan error
+│   │   ├── app.js
+│   │   ├── db.js                 # SQLite dan definisi katalog awal
+│   │   ├── mysql.js              # Koneksi, skema, dan seed MySQL
+│   │   └── server.js
+│   ├── tests/api.test.js
+│   ├── uploads/                  # Dibuat saat runtime, diabaikan Git
+│   └── .env.example
+├── design-system/evarti-rental/   # Pedoman desain dan pratinjau UI
+├── PRD-evarti.md
+├── README-hosting.md
+├── package.json                  # npm workspaces dan perintah utama
+└── README.md
+```
