@@ -1,0 +1,22 @@
+{
+  "name": "evarti-sewa-camera",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "Front-end",
+    "back-end"
+  ],
+  "scripts": {
+    "dev": "concurrently --kill-others --names API,WEB --prefix-colors magenta,cyan \"npm run dev --workspace evarti-rental-backend\" \"npm run dev --workspace evarti-rental-frontend\"",
+    "dev:backend": "npm run dev --workspace evarti-rental-backend",
+    "dev:frontend": "npm run dev --workspace evarti-rental-frontend",
+    "build": "npm run build --workspace evarti-rental-frontend",
+    "test": "npm test --workspace evarti-rental-backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
