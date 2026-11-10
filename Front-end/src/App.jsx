@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowLeft, ArrowRight, ArrowUpRight, BadgeCheck, Banknote,
   BarChart3, Bell, CalendarDays, Camera, Check, CheckCircle2, ChevronDown,
@@ -8,6 +9,9 @@ import {
   Trash2, X, FolderInput, Save, RotateCcw,
 } from 'lucide-react';
 import { api, assetUrl, imageCredentials } from './services/api.js';
+import { printer, testReceipt } from './services/printer.js';
+import { printGeometry } from './services/receipt-encoder.js';
+import PrinterSettings, { usePrinter } from './components/PrinterSettings.jsx';
 
 const demoUsers = [
   { username: 'owner', name: 'Akbar', role: 'owner', title: 'Owner' },
@@ -144,6 +148,41 @@ function StatCard({ label, value, detail, icon: Icon, tone = 'pink', trend }) {
 }
 
 function Receipt({ transaction, variant = 'customer' }) {
+  const { settings: { paperWidth } } = usePrinter();
+  const geometry = printGeometry(paperWidth);
+  const paperStyle = { '--receipt-paper-width': `${paperWidth}mm`, '--receipt-side-padding': `${geometry.sidePadding}mm` };
+  const printRoot = useRef(null);
+  const pageStyle = useRef(null);
+
+  useLayoutEffect(() => {
+    const paper = printRoot.current?.querySelector('.receipt-paper');
+    if (!paper) return undefined;
+    const updatePageSize = () => {
+      // CSS pixels are 1/96 inch. Round up and allow 1 mm for print rounding.
+      const heightMm = Math.ceil(paper.getBoundingClientRect().height * 25.4 / 96) + 1;
+      pageStyle.current.textContent = `@page { size: ${paperWidth}mm ${heightMm}mm; margin: 0; }`;
+    };
+    updatePageSize();
+    const observer = new ResizeObserver(updatePageSize);
+    observer.observe(paper);
+    window.addEventListener('beforeprint', updatePageSize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('beforeprint', updatePageSize);
+    };
+  }, [transaction, variant, paperWidth]);
+
+  if (!transaction) return null;
+  return <>
+    <div className="receipt-preview-root" style={paperStyle}><ReceiptContent transaction={transaction} variant={variant} /></div>
+    {createPortal(<div className="receipt-print-root" ref={printRoot} style={paperStyle} data-receipt-id={transaction.id || transaction.receiptNo} data-receipt-variant={variant} data-paper-width={paperWidth} aria-hidden="true">
+      <style ref={pageStyle} media="print" />
+      <ReceiptContent transaction={transaction} variant={variant} />
+    </div>, document.body)}
+  </>;
+}
+
+function ReceiptContent({ transaction, variant = 'customer' }) {
   if (!transaction) return null;
   const currency = (value) => formatCurrency(value).replace('IDR', 'Rp');
   const items = transaction.items?.length ? transaction.items : [{
@@ -191,11 +230,11 @@ function Receipt({ transaction, variant = 'customer' }) {
       <div className="receipt-rule" />
       {items.map((item, index) => <React.Fragment key={`${item.cameraId || item.cameraName}-${index}`}>
         <div className="receipt-item-name">{item.cameraName}</div>
-        <div className="receipt-row"><span>{item.durationLabel}{item.isManualPrice ? ' · Tarif Manual' : ''}</span><b>{currency(item.price)}</b></div>
+        <div className="receipt-row receipt-item-price"><span>{item.durationLabel}{item.isManualPrice ? ' · Tarif Manual' : ''}</span><b>{currency(item.price)}</b></div>
       </React.Fragment>)}
       {addons.map((addon) => <React.Fragment key={addon.id}>
         <div className="receipt-item-name">{addon.isManual ? 'Add-on' : addonCategoryLabels[addon.category]} · {addon.label}</div>
-        <div className="receipt-row"><span>Add-on</span><b>{addon.price > 0 ? currency(addon.price) : 'Gratis'}</b></div>
+        <div className="receipt-row receipt-item-price"><span>Add-on</span><b>{addon.price > 0 ? currency(addon.price) : 'Gratis'}</b></div>
       </React.Fragment>)}
       <div className="receipt-rule" />
       <div className="receipt-row receipt-total"><span>TOTAL</span><b>{currency(transaction.total)}</b></div>
@@ -214,6 +253,7 @@ function Receipt({ transaction, variant = 'customer' }) {
 }
 
 function App() {
+  const printerState = usePrinter();
   const [user, setUser] = useState(null);
   const [booting, setBooting] = useState(true);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
@@ -243,6 +283,20 @@ function App() {
   const [printSubmitting, setPrintSubmitting] = useState(false);
   const [printVariant, setPrintVariant] = useState('customer');
   const printTimer = useRef(null);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    printer.reconnect();
+    const serial = navigator.serial;
+    const connected = () => printer.reconnect();
+    const disconnected = (event) => printer.handleDisconnect(event.target);
+    serial?.addEventListener('connect', connected);
+    serial?.addEventListener('disconnect', disconnected);
+    return () => {
+      serial?.removeEventListener('connect', connected);
+      serial?.removeEventListener('disconnect', disconnected);
+    };
+  }, [user]);
 
   const refreshWorkspace = useCallback(async () => {
     setWorkspaceLoading(true);
@@ -387,7 +441,7 @@ function App() {
       setPrintVariant(variant);
       setPrintSelection(null);
       setPage(`print-${variant}`);
-      printTimer.current = window.setTimeout(() => window.print(), 220);
+      await sendToPrinter(result.transaction, variant, 220);
     } catch (error) {
       setNotice(error.message);
     } finally {
@@ -396,15 +450,25 @@ function App() {
   };
 
   const printSelectedVariant = async () => {
-    if (!savedTransaction) return;
+    if (!savedTransaction || printSubmitting) return;
+    setPrintSubmitting(true);
     try {
       const result = await api.markPrinted(savedTransaction.id);
       setSavedTransaction(result.transaction);
       setTransactions((previous) => previous.map((item) => item.id === savedTransaction.id ? result.transaction : item));
-      printTimer.current = window.setTimeout(() => window.print(), 100);
+      await sendToPrinter(result.transaction, printVariant, 100);
     } catch (error) {
       setNotice(error.message);
+    } finally {
+      setPrintSubmitting(false);
     }
+  };
+
+  const sendToPrinter = async (transaction, variant, delay) => {
+    await new Promise((resolve) => { printTimer.current = window.setTimeout(resolve, delay); });
+    const result = await printer.print(transaction, variant);
+    if (result === 'sent') setNotice('Data struk dikirim. Periksa hasil cetak pada printer.');
+    if (result === 'handoff') setNotice('Struk diserahkan ke RawBT. Periksa hasil cetak di aplikasi tersebut.');
   };
 
   const navItems = [
@@ -413,6 +477,7 @@ function App() {
     { id: 'history', label: 'Riwayat transaksi', icon: FileText, count: visibleTransactions.length },
     ...(isOwner ? [{ id: 'catalog', label: 'Katalog sewa', icon: Camera }] : []),
     ...(isOwner ? [{ id: 'reports', label: 'Laporan', icon: BarChart3 }] : []),
+    { id: 'printer', label: 'Printer', icon: Printer },
   ];
 
   if (booting) return <main className="login-page"><div className="login-panel"><div className="login-box"><span className="eyebrow">EVARTI RENTAL STUDIO</span><h2>Memeriksa sesi...</h2><p className="login-subtitle">Menghubungkan ke server dengan aman.</p></div></div></main>;
@@ -452,7 +517,7 @@ function App() {
             user={user} transactions={visibleTransactions} todayTransactions={todayTransactions}
             revenueToday={revenueToday} onNavigate={setPage} onPrint={openPrint}
           />}
-          {page === 'create' && <CreateTransaction
+          {page === 'create' && <CreateTransaction paperWidth={printerState.settings.paperWidth}
             user={user} cameras={visibleCameras} addons={addons.filter((addon) => addon.active)} onSave={(transaction) => {
               return api.createTransaction(transaction.payload, transaction.guaranteePhoto).then(({ transaction: saved }) => {
                 setTransactions((previous) => [saved, ...previous.filter((item) => item.id !== saved.id)]);
@@ -570,7 +635,8 @@ function App() {
               }
             }}
           />}
-          {(page === 'print-admin' || page === 'print-customer') && savedTransaction && <PrintView transaction={savedTransaction} variant={printVariant} onBack={() => setPage('history')} onPrint={printSelectedVariant} onChangeFormat={() => setPrintSelection(savedTransaction)} />}
+          {page === 'printer' && <><PageHeading eyebrow="PENGATURAN PERANGKAT" title="Printer struk." description="Pilih metode cetak dan printer yang digunakan pada perangkat kasir ini." /><PrinterSettings receiptPreview={<Receipt transaction={testReceipt} />} /></>}
+          {(page === 'print-admin' || page === 'print-customer') && savedTransaction && <PrintView transaction={savedTransaction} variant={printVariant} settings={printerState.settings} busy={printSubmitting} onSettings={() => setPage('printer')} onBack={() => setPage('history')} onPrint={printSelectedVariant} onChangeFormat={() => setPrintSelection(savedTransaction)} />}
         </div>
       </main>
       {printSelection && <div className="print-choice-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPrintSelection(null); }}>
@@ -671,7 +737,7 @@ function EmptyState({ title, body }) {
   return <div className="empty-state"><div className="empty-icon"><FileText size={21} /></div><strong>{title}</strong><p>{body}</p></div>;
 }
 
-function CreateTransaction({ user, cameras, addons, onSave, onVerify, onNotice, onPrint, savedTransaction }) {
+function CreateTransaction({ user, cameras, addons, onSave, onVerify, onNotice, onPrint, savedTransaction, paperWidth }) {
   const [location, setLocation] = useState(user.username === 'kasir2' ? 'event' : 'cafe');
   const assignedLocation = user.username === 'kasir1' ? 'cafe' : user.username === 'kasir2' ? 'event' : null;
   const activeLocation = assignedLocation || location;
@@ -1070,7 +1136,7 @@ function CreateTransaction({ user, cameras, addons, onSave, onVerify, onNotice, 
             <div className="preview-heading"><div><span className="eyebrow">LIVE PREVIEW</span><h2>Pratinjau struk</h2></div><span className="preview-live-dot"><i /> LIVE</span></div>
             <div className="receipt-location-tag">{activeLocation === 'cafe' ? 'CAF' : 'EVT'} <span>•</span> {activeLocation === 'cafe' ? 'Cafe' : 'Event'}</div>
             <Receipt transaction={preview} />
-            <div className="preview-footer"><span><Printer size={14} /> Thermal receipt · 58 mm</span><span>Tinjau detail sebelum cetak</span></div>
+            <div className="preview-footer"><span><Printer size={14} /> Thermal receipt · {paperWidth} mm</span><span>Tinjau detail sebelum cetak</span></div>
             {needsVerification && <button className="button button-primary button-full verify-button" onClick={verifyPayment} disabled={verifyingPayment} aria-busy={verifyingPayment}>{verifyingPayment ? <><span className="button-spinner" /> Memverifikasi...</> : <><BadgeCheck size={17} /> Pembayaran Terverifikasi</>}</button>}
             {isSavedPaid && <button className="button button-primary button-full verify-button" onClick={() => onPrint(activeTransaction)}><Printer size={17} /> Cetak struk</button>}
             {savedTransaction && !savedHere && <button className="button button-secondary button-full verify-button" onClick={() => onPrint(savedTransaction)}><Printer size={17} /> Cetak struk terakhir</button>}
@@ -1383,9 +1449,22 @@ function Reports({
   );
 }
 
-function PrintView({ transaction, variant, onBack, onPrint, onChangeFormat }) {
+function PrintView({ transaction, variant, settings, busy, onSettings, onBack, onPrint, onChangeFormat }) {
   const isAdmin = variant === 'admin';
-  return <div className="print-page"><PageHeading eyebrow={isAdmin ? 'STRUK ADMIN' : 'STRUK PELANGGAN'} title="Siap untuk dicetak." description={`${transaction.receiptNo} · ${transaction.location === 'cafe' ? 'Cafe' : 'Event'}`} action={<button className="button button-secondary" onClick={onBack}><ArrowLeft size={16} /> Kembali</button>} /><div className="print-layout"><div className="panel print-help"><div className="print-help-icon"><Printer size={22} /></div><h2>Struk {isAdmin ? 'admin' : 'pelanggan'}</h2><p>Gunakan kertas 58 mm. Pada dialog cetak, pilih printer Rongta RPP02N atau printer thermal yang tersedia.</p><div className="print-steps"><span><i>1</i> Klik tombol cetak</span><span><i>2</i> Pilih printer &amp; ukuran kertas</span><span><i>3</i> Pastikan skala 100%</span></div><button className="button button-primary" onClick={onPrint}><Printer size={17} /> Cetak struk {isAdmin ? 'admin' : 'pelanggan'}</button><button className="button button-secondary print-change-format" onClick={onChangeFormat}>Pilih format struk lainnya</button></div><div className="print-preview"><span className="eyebrow">PRATINJAU · 58 MM · {isAdmin ? 'ADMIN' : 'PELANGGAN'}</span><Receipt transaction={transaction} variant={variant} /></div></div></div>;
+  return <div className="print-page">
+    <PageHeading eyebrow={isAdmin ? 'STRUK ADMIN' : 'STRUK PELANGGAN'} title="Siap untuk dicetak." description={`${transaction.receiptNo} · ${transaction.location === 'cafe' ? 'Cafe' : 'Event'}`} action={<button className="button button-secondary" disabled={busy} onClick={onBack}><ArrowLeft size={16} /> Kembali</button>} />
+    <div className="print-layout">
+      <div className="panel print-help">
+        <div className="print-help-icon"><Printer size={22} /></div><h2>Struk {isAdmin ? 'admin' : 'pelanggan'}</h2>
+        <p>Kertas {settings.paperWidth} mm · {settings.mode === 'browser' ? 'Printer sistem' : settings.mode === 'rawbt' ? 'Penghubung RawBT Android' : settings.label || 'Printer ESC/POS'}</p>
+        <p>{settings.mode === 'browser' ? 'Pilih printer dengan kertas roll dan panjang otomatis, skala 100%, serta nonaktifkan header/footer browser.' : settings.mode === 'rawbt' ? 'Printer default mengikuti pengaturan di aplikasi RawBT. Periksa hasil cetak melalui aplikasi tersebut.' : 'Struk dikirim langsung ke printer yang telah dipilih. Jika printer diganti, pilih perangkat baru di pengaturan.'}</p>
+        <button className="button button-primary" disabled={busy} aria-busy={busy} onClick={onPrint}><Printer size={17} /> {busy ? 'Memproses…' : `Cetak struk ${isAdmin ? 'admin' : 'pelanggan'}`}</button>
+        <button className="button button-secondary print-change-format" disabled={busy} onClick={onChangeFormat}>Pilih format struk lainnya</button>
+        <button className="button button-secondary print-change-format" disabled={busy} onClick={onSettings}><Settings2 size={16} /> Pengaturan printer</button>
+      </div>
+      <div className="print-preview"><span className="eyebrow">PRATINJAU · {settings.paperWidth} MM · {isAdmin ? 'ADMIN' : 'PELANGGAN'}</span><Receipt transaction={transaction} variant={variant} /></div>
+    </div>
+  </div>;
 }
 
 export default App;

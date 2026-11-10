@@ -14,7 +14,7 @@ Pemesanan dan pembayaran dilakukan melalui staf Evarti; aplikasi ini digunakan u
 - **Add-on katalog:** properti, fotografer, print foto, dan pemindahan file. Owner dapat mengelola nama, harga, dan statusnya. Perubahan disimpan melalui tombol **Simpan katalog add-on**.
 - **Layanan manual:** tambahkan satu add-on dengan nama dan harga khusus per transaksi, termasuk layanan gratis. Layanan ini tersimpan bersama transaksi tanpa masuk ke katalog.
 - **Pembayaran:** tunai dengan perhitungan kembalian, atau QRIS DANA yang diverifikasi manual oleh kasir pembuat transaksi atau owner.
-- **Struk thermal 58 mm:** pratinjau, pilihan struk pelanggan atau admin, cetak melalui dialog browser, serta cetak ulang transaksi lunas. Antarmuka mencantumkan printer Rongta RPP02N sebagai pilihan.
+- **Printer struk:** pengaturan umum untuk kertas thermal 58/80 mm, pilihan struk pelanggan atau admin, tes cetak, dan cetak ulang transaksi lunas. Mendukung dialog printer sistem, ESC/POS melalui Bluetooth/USB serial pada browser yang sesuai, serta penghubung RawBT di Android. Panjang halaman cetak browser mengikuti isi struk.
 - **Riwayat:** pencarian nomor struk, nama, atau WhatsApp; filter lokasi, tanggal, dan kasir untuk owner; serta tombol void dengan alasan pada antarmuka owner.
 - **Laporan owner:** rekap harian, mingguan, dan bulanan; pendapatan menurut metode pembayaran, lokasi, dan kasir; kamera terlaris; serta unduhan PDF. Pendapatan hanya menghitung transaksi lunas.
 - **Snapshot dan audit:** nama dan harga kamera maupun add-on disalin ke transaksi agar struk lama tetap konsisten ketika katalog berubah. Tarif manual, layanan manual, verifikasi QRIS, void, dan pencetakan struk dicatat dalam audit log yang tersedia melalui API owner.
@@ -45,7 +45,7 @@ Nomor struk menggunakan format `CAF-YYYYMMDD-001` untuk Cafe dan `EVT-YYYYMMDD-0
 
 | Bagian | Teknologi |
 | --- | --- |
-| Frontend | React 18, Vite 6, Lucide React, CSS |
+| Frontend | React 18, Vite 6, Lucide React, html2canvas, CSS |
 | Backend | Node.js, Express 4, Zod |
 | Database utama | MySQL melalui `mysql2/promise`, tabel InnoDB dan charset `utf8mb4` |
 | SQLite | `better-sqlite3` untuk dukungan database lama, migrasi, dan pengujian API |
@@ -139,6 +139,22 @@ npm run dev:frontend
 
 ## Konfigurasi
 
+### Printer kasir
+
+Buka menu **Printer** pada aplikasi. Pengaturan disimpan di browser perangkat kasir, berlaku lintas halaman dan akun pada browser tersebut. Setiap HP/laptop memilih printernya sendiri. Mengganti printer tidak memerlukan perubahan kode atau konfigurasi server.
+
+| Metode | Pengaturan dan batas dukungan |
+| --- | --- |
+| Printer sistem / dialog browser | Pasangkan Bluetooth atau instal driver pada perangkat, lalu pilih printer di dialog cetak. Pilihan printer fisik mengikuti browser/OS; aplikasi tidak dapat memaksanya atau memastikan hasil cetak. Mendukung logo dan panjang halaman sesuai isi. Gunakan kertas roll 58/80 mm sesuai pengaturan aplikasi, panjang otomatis bila tersedia, skala 100%, serta nonaktifkan header/footer. |
+| Langsung Bluetooth / USB serial (ESC/POS) | Memerlukan printer ESC/POS dengan Bluetooth Classic SPP atau USB serial, browser yang menyediakan Web Serial, serta HTTPS/localhost. Pasangkan Bluetooth melalui OS, lalu klik **Pilih printer** dan berikan izin awal. Setelah itu aplikasi dapat membuka kembali port yang telah diizinkan tanpa pemilih perangkat. Gunakan **Ganti printer** untuk memilih perangkat lain. Jika beberapa port memiliki identitas yang sama, aplikasi meminta pemilihan ulang. Kecepatan serial harus sesuai panduan printer. |
+| Bluetooth Android melalui RawBT | Pasang dan atur printer default di aplikasi [RawBT](https://rawbt.ru/), lalu pilih metode tersebut di Evarti. Data dikirim melalui `rawbt:base64,`; pemasangan Bluetooth, penyambungan kembali, penggantian printer, dan hasil cetak ditangani RawBT. Browser hanya dapat melaporkan penyerahan data, bukan keberhasilan cetak fisik. |
+
+Pratinjau, cetak browser, dan cetak Bluetooth memakai komponen dan ukuran fisik struk yang sama. Cetak langsung/RawBT merender komponen tersebut beserta logo melalui html2canvas, mengubahnya menjadi gambar hitam-putih, lalu mengirim gambar ESC/POS GS v 0 dalam band kecil. Logo wajib selesai dimuat sebelum data dikirim; kegagalan render tidak dialihkan diam-diam ke format teks. Kertas 58 mm memakai area cetak 48 mm (384 titik), sedangkan 80 mm memakai area 72 mm (576 titik), untuk printer 203 dpi yang mendukung cetak raster. Feed akhir 12 mm memberi ruang setelah baris terakhir untuk merobek kertas tanpa mengasumsikan pemotong otomatis. Data serial dikirim bertahap untuk mengurangi risiko penuhnya buffer Bluetooth. Printer Bluetooth BLE, printer label, serta perangkat dengan bahasa selain ESC/POS tidak otomatis kompatibel dengan koneksi serial ini. Gunakan printer sistem/driver yang sesuai apabila metode langsung tidak cocok. Semua metode tetap membatasi struk transaksi pada pembayaran lunas; tes cetak menggunakan data contoh lokal tanpa mencatat transaksi atau audit cetak.
+
+Referensi protokol: [Chrome Web Serial](https://developer.chrome.com/docs/capabilities/serial), [Bluetooth RFCOMM](https://developer.chrome.com/blog/bluetooth-rfcomm-updates-web-serial), [contoh integrasi resmi RawBT](https://github.com/402d/rawbt.402d.ru/blob/master/app2/index.php), dan [ESC/POS raster Epson](https://download4.epson.biz/sec_pubs/pos/reference_en/escpos/gs_lv_0.html), dan [opsi html2canvas](https://html2canvas.hertzen.com/configuration).
+
+### Environment aplikasi
+
 Backend membaca `.env` di root repositori terlebih dahulu. Jika tidak tersedia, backend membaca `back-end/.env`. Environment proses yang sudah diatur mengambil prioritas atas nilai dari file.
 
 | Variabel | Kegunaan | Default / ketentuan |
@@ -172,6 +188,7 @@ Frontend menyediakan template `Front-end/.env.example` dengan variabel `VITE_API
 | `npm test` | Menjalankan pengujian API backend |
 | `npm run test:coverage --workspace evarti-rental-backend` | Menjalankan pengujian dengan laporan coverage |
 | `npm run build` | Membuat frontend production di `Front-end/dist/` |
+| `npm test --workspace evarti-rental-frontend` | Menguji pengaturan printer, perpindahan perangkat, reconnect, pengiriman ESC/POS, dan kegagalan koneksi melalui transport simulasi |
 | `npm run preview --workspace evarti-rental-frontend` | Melihat hasil build frontend secara lokal |
 | `npm run start --workspace evarti-rental-backend` | Menjalankan backend untuk konfigurasi deployment |
 
