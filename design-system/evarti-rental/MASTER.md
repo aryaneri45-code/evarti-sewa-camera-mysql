@@ -20,7 +20,7 @@ Functional, calm, warm, and readable. UI/UX Pro Max searches recommended minimal
 System sans-serif with DM Sans when available. Page headings 28–36px, section headings 16–20px, body 14–16px, supporting labels 12–13px. Inputs use 16px on mobile. Tabular numerals for monetary metrics. Keep existing receipt-specific monospace typography and thermal-paper print rules.
 
 ## Layout
-Desktop sidebar 232px, compact sidebar 208px, drawer below 768px. White topbar, warm canvas. Dashboard uses four metrics and grouped payment/recent-activity cards. Forms use a single primary action and a separate receipt preview. Catalog uses camera cards and two add-on categories per row on wide screens, then one on narrower screens. Avoid horizontal page overflow; transaction tables may scroll within their container.
+Desktop sidebar 232px, compact sidebar 216px from 768–1279px, drawer below 768px. Navigation scrolls vertically when needed; hide the decorative sidebar note on screens up to 850px tall. White topbar, warm canvas. Dashboard uses four metrics, reduced to two columns on tablet widths, and grouped payment/recent-activity cards. Transaction forms and receipt previews sit side by side from 1000px; sticky previews and catalog forms scroll within the available viewport height. Keep the save action in the form flow so it does not cover fields. Catalog camera cards keep a minimum width of 200px on tablet and desktop. Avoid horizontal page overflow; transaction tables may scroll within their container.
 
 ## Interaction and accessibility
 - Controls provide visible focus and hover states; frequent actions have 44px targets.

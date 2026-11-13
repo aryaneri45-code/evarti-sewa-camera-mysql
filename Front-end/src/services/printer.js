@@ -106,6 +106,17 @@ export class PrinterManager {
 
   async print(transaction, variant = 'customer') {
     if (transaction.paymentStatus !== 'paid') throw new Error('Struk hanya dapat dicetak setelah pembayaran lunas.');
+    return this.printDocument(transaction, variant);
+  }
+
+  async printDailyReport(report) {
+    if (!report.date || !Array.isArray(report.transactions) || !report.transactions.length) {
+      throw new Error('Tidak ada transaksi pada tanggal tersebut untuk dicetak.');
+    }
+    return this.printDocument(report, 'daily-report');
+  }
+
+  async printDocument(transaction, variant) {
     if (this.busy) throw new Error('Printer sedang mengirim struk. Tunggu sampai selesai.');
     const { mode, paperWidth } = this.state.settings;
     if (mode === 'browser') { this.environment.print(); return 'dialog'; }

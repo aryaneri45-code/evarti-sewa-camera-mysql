@@ -22,15 +22,15 @@ export function monochromeRaster({ width, height, data }, threshold = 180) {
   return { width, height, stride, pixels };
 }
 
-export function encodeRaster(imageData) {
+export function encodeRaster(imageData, { initialize = true, feed = true } = {}) {
   const { height, stride, pixels } = monochromeRaster(imageData);
   if (stride > 72) throw new Error('Gambar struk melebihi lebar printer 80 mm.');
   // Small image bands fit portable printer buffers and preserve continuous height.
   const bandHeight = 24;
   const bandCount = Math.ceil(height / bandHeight);
-  const bytes = new Uint8Array(5 + bandCount * 8 + pixels.length + 3);
-  bytes.set([27, 64, 27, 97, 1]);
-  let offset = 5;
+  const bytes = new Uint8Array((initialize ? 5 : 0) + bandCount * 8 + pixels.length + (feed ? 3 : 0));
+  if (initialize) bytes.set([27, 64, 27, 97, 1]);
+  let offset = initialize ? 5 : 0;
   for (let y = 0; y < height; y += bandHeight) {
     const rows = Math.min(bandHeight, height - y);
     bytes.set([29, 118, 48, 0, stride & 255, stride >> 8, rows & 255, rows >> 8], offset);
@@ -40,6 +40,6 @@ export function encodeRaster(imageData) {
     offset += band.length;
   }
   // Leave 12 mm after the final image so the tear edge clears the last text line.
-  bytes.set([27, 74, 96], offset);
+  if (feed) bytes.set([27, 74, 96], offset);
   return bytes;
 }

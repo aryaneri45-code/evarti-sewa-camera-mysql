@@ -227,3 +227,62 @@ test('the transport passes the chosen receipt variant and paper width to the sha
   assert.deepEqual(calls.renders, [[testReceipt, 'admin', 80]]);
   assert.deepEqual(port.writes, [...sampleRaster]);
 });
+
+const dailyReport = {
+  id: 'daily-report-2026-11-14', date: '2026-11-14',
+  transactions: ['paid', 'pending_verification', 'void'].map((paymentStatus, id) => ({ id, paymentStatus })),
+};
+
+test('daily report uses the configured thermal transport and width for every payment status', async () => {
+  for (const paperWidth of [58, 80]) {
+    const port = mockPort();
+    const { manager, calls } = setup({ ports: [port] });
+    manager.configure({ mode: 'serial', paperWidth });
+    await manager.connect(true);
+    assert.equal(await manager.printDailyReport(dailyReport), 'sent');
+    assert.deepEqual(calls.renders, [[dailyReport, 'daily-report', paperWidth]]);
+    assert.deepEqual(port.writes, [...sampleRaster]);
+    assert.equal(calls.dialogs, 0);
+    await assert.rejects(manager.print({ ...testReceipt, paymentStatus: 'void' }), /lunas/);
+  }
+});
+
+test('daily report supports system printing and Android handoff, and rejects empty reports', async () => {
+  const system = setup();
+  assert.equal(await system.manager.printDailyReport(dailyReport), 'dialog');
+  assert.equal(system.calls.dialogs, 1);
+  assert.equal(system.calls.renders.length, 0);
+  await assert.rejects(system.manager.printDailyReport({ ...dailyReport, transactions: [] }), /Tidak ada transaksi/);
+  assert.equal(system.calls.dialogs, 1);
+  const android = setup({ userAgent: 'Android Chrome' });
+  android.manager.configure({ mode: 'rawbt', paperWidth: 80 });
+  assert.equal(await android.manager.printDailyReport(dailyReport), 'handoff');
+  assert.deepEqual(android.calls.renders, [[dailyReport, 'daily-report', 80]]);
+  assert.deepEqual(Buffer.from(android.calls.locations[0].split(',')[1], 'base64'), Buffer.from(sampleRaster));
+});
+
+test('a report and a receipt share the same printer lock', async () => {
+  const port = mockPort();
+  const { manager } = setup({ ports: [port] });
+  manager.configure({ mode: 'serial' });
+  await manager.connect(true);
+  let finishRender;
+  manager.rasterize = () => new Promise(resolve => { finishRender = () => resolve(sampleRaster); });
+  const active = manager.printDailyReport(dailyReport);
+  await new Promise(resolve => setImmediate(resolve));
+  await assert.rejects(manager.printDailyReport(dailyReport), /sedang mengirim/);
+  await assert.rejects(manager.print(testReceipt), /sedang mengirim/);
+  finishRender();
+  await active;
+});
+
+test('report image sections form one continuous ESC/POS job with only one final feed', () => {
+  const image = { width: 384, height: 1, data: new Uint8ClampedArray(384 * 4).fill(255) };
+  const full = encodeRaster(image);
+  const first = encodeRaster(image, { feed: false });
+  const middle = encodeRaster(image, { initialize: false, feed: false });
+  const last = encodeRaster(image, { initialize: false });
+  assert.deepEqual(first, full.slice(0, -3));
+  assert.deepEqual(middle, full.slice(5, -3));
+  assert.deepEqual(last, full.slice(5));
+});

@@ -12,6 +12,8 @@ import { api, assetUrl, imageCredentials } from './services/api.js';
 import { printer, testReceipt } from './services/printer.js';
 import { printGeometry } from './services/receipt-encoder.js';
 import PrinterSettings, { usePrinter } from './components/PrinterSettings.jsx';
+import DailyTransactionReport from './components/DailyTransactionReport.jsx';
+import { loadDailyTransactions } from './services/history-report.js';
 
 const demoUsers = [
   { username: 'owner', name: 'Akbar', role: 'owner', title: 'Owner' },
@@ -1153,7 +1155,37 @@ function SectionTitle({ number, title, subtitle }) {
 }
 
 function History({ transactions, isOwner, search, setSearch, location, setLocation, cashier, setCashier, date, setDate, onPrint, onVoid }) {
+  const { settings: printerSettings, status: printerStatus } = usePrinter();
   const [tab, setTab] = useState('all');
+  const [dailyReport, setDailyReport] = useState(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [printError, setPrintError] = useState('');
+  const [printMessage, setPrintMessage] = useState('');
+  const closeDailyReport = useCallback(() => { setDailyReport(null); setReportLoading(false); }, []);
+  const completeDailyReport = useCallback((result) => {
+    setPrintMessage(result === 'sent' ? 'Rekap dikirim ke printer thermal. Periksa hasil cetak pada printer.'
+      : result === 'handoff' ? 'Rekap diserahkan ke RawBT. Periksa hasil cetak di aplikasi tersebut.'
+        : 'Dialog cetak thermal dibuka.');
+  }, []);
+  const printDate = date || formatJakartaDate();
+  const printDailyTransactions = async () => {
+    if (reportLoading) return;
+    setReportLoading(true);
+    setPrintError('');
+    setPrintMessage('');
+    try {
+      const allTransactions = await loadDailyTransactions(printDate, api.transactions);
+      if (!allTransactions.length) {
+        setPrintError('Tidak ada transaksi pada tanggal tersebut untuk dicetak.');
+        setReportLoading(false);
+        return;
+      }
+      setDailyReport({ date: printDate, transactions: allTransactions });
+    } catch (error) {
+      setPrintError(error.message);
+      setReportLoading(false);
+    }
+  };
   const cameraSummary = (transaction) => (transaction.items || [{
     cameraName: transaction.cameraName,
     durationLabel: transaction.durationLabel,
@@ -1164,13 +1196,21 @@ function History({ transactions, isOwner, search, setSearch, location, setLocati
     const matchesSearch = !query || [transaction.receiptNo, transaction.customerName, transaction.customerWhatsapp].some((value) => value?.toLowerCase().includes(query));
     return matchesSearch && (location === 'all' || transaction.location === location) &&
       (!isOwner || cashier === 'all' || transaction.cashierId === cashier) &&
-      (!date || transaction.createdAt.slice(0, 10) === date) &&
+      (!date || formatJakartaDate(new Date(transaction.createdAt)) === date) &&
       (tab === 'all' || transaction.location === tab);
   }).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)), [transactions, search, location, cashier, date, tab, isOwner]);
   const countFor = (value) => transactions.filter((transaction) => value === 'all' || transaction.location === value).length;
   return (
     <>
-      <PageHeading eyebrow="ARSIP PENYEWAAN" title="Riwayat transaksi." description="Temukan transaksi, tinjau pembayaran, dan cetak ulang struk." />
+      <PageHeading eyebrow="ARSIP PENYEWAAN" title="Riwayat transaksi." description="Temukan transaksi, tinjau pembayaran, dan cetak ulang struk." action={
+        <button className="button button-primary" type="button" onClick={printDailyTransactions} disabled={reportLoading || printerStatus === 'printing'} aria-busy={reportLoading} aria-describedby="daily-print-help">
+          {reportLoading ? <><span className="button-spinner" /> Mencetak rekap...</> : <><Printer size={17} aria-hidden="true" /> {date ? 'Cetak tanggal ini' : 'Cetak hari ini'}</>}
+        </button>
+      } />
+      <p className="history-print-help" id="daily-print-help">Cetak rekap semua transaksi {formatDate(`${printDate}T12:00:00+07:00`)} (WIB) ke printer thermal {printerSettings.paperWidth} mm sesuai pengaturan menu Printer. Rekap mencakup semua lokasi{isOwner ? ' dan kasir' : ' untuk akun ini'}, tanpa filter pencarian.</p>
+      {printError && <div className="form-error" role="alert">{printError}</div>}
+      {printMessage && <p className="printer-message" role="status">{printMessage}</p>}
+      {dailyReport && <DailyTransactionReport {...dailyReport} isOwner={isOwner} paperWidth={printerSettings.paperWidth} onClose={closeDailyReport} onError={setPrintError} onComplete={completeDailyReport} />}
       <div className="history-tabs"><button aria-pressed={tab === 'all'} onClick={() => setTab('all')} className={tab === 'all' ? 'history-tab-active' : ''}>Semua <span>{countFor('all')}</span></button><button aria-pressed={tab === 'cafe'} onClick={() => setTab('cafe')} className={tab === 'cafe' ? 'history-tab-active' : ''}>Cafe <span>{countFor('cafe')}</span></button><button aria-pressed={tab === 'event'} onClick={() => setTab('event')} className={tab === 'event' ? 'history-tab-active' : ''}>Event <span>{countFor('event')}</span></button></div>
       <div className="panel history-panel">
         <div className="history-toolbar"><div className="search-input"><Search size={17} /><input aria-label="Cari transaksi" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari no. struk, nama, atau WhatsApp..." /></div><div className="filter-controls"><label className="select-filter"><Filter size={15} /><select aria-label="Filter lokasi transaksi" value={location} onChange={(event) => setLocation(event.target.value)}><option value="all">Semua lokasi</option><option value="cafe">Cafe</option><option value="event">Event</option></select><ChevronDown size={14} /></label>{isOwner && <label className="select-filter"><Users size={15} /><select aria-label="Filter kasir transaksi" value={cashier} onChange={(event) => setCashier(event.target.value)}><option value="all">Semua kasir</option><option value="kasir1">Kasir 1</option><option value="kasir2">Kasir 2</option></select><ChevronDown size={14} /></label>}<label className="date-filter"><CalendarDays size={15} /><input aria-label="Tanggal transaksi" type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label></div></div>
