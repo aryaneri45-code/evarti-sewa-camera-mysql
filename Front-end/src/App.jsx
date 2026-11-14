@@ -432,6 +432,13 @@ function App() {
     setPrintSelection(transaction);
   };
 
+  const verifyTransaction = async (transaction) => {
+    const { transaction: updated } = await api.verifyTransaction(transaction.id);
+    setTransactions((previous) => previous.map((item) => item.id === updated.id ? updated : item));
+    setSavedTransaction(updated);
+    return updated;
+  };
+
   const selectPrintVariant = async (variant) => {
     const transaction = printSelection;
     if (!transaction || printSubmitting) return;
@@ -527,17 +534,13 @@ function App() {
                 setNotice(saved.paymentStatus === 'pending_verification' ? 'Transaksi tersimpan · menunggu verifikasi QRIS' : 'Struk berhasil disimpan');
                 return saved;
               });
-            }} onVerify={async (transaction) => {
-              const { transaction: updated } = await api.verifyTransaction(transaction.id);
-              setTransactions((previous) => previous.map((item) => item.id === updated.id ? updated : item));
-              setSavedTransaction(updated);
-              return updated;
-            }} notice={notice} onNotice={setNotice} onPrint={openPrint} savedTransaction={savedTransaction}
+            }} onVerify={verifyTransaction} notice={notice} onNotice={setNotice} onPrint={openPrint} savedTransaction={savedTransaction}
           />}
           {page === 'history' && <History
             transactions={visibleTransactions} isOwner={isOwner} search={historySearch}
             setSearch={setHistorySearch} location={historyLocation} setLocation={setHistoryLocation}
             cashier={historyCashier} setCashier={setHistoryCashier} date={historyDate} setDate={setHistoryDate}
+            onVerify={verifyTransaction} onNotice={setNotice}
             onPrint={openPrint} onVoid={async (transaction) => {
               const reason = window.prompt(`Alasan membatalkan ${transaction.receiptNo}:`);
               if (reason == null) return;
@@ -1154,9 +1157,25 @@ function SectionTitle({ number, title, subtitle }) {
   return <div className="form-section-title"><span>{number}</span><div><h2>{title}</h2><p>{subtitle}</p></div></div>;
 }
 
-function History({ transactions, isOwner, search, setSearch, location, setLocation, cashier, setCashier, date, setDate, onPrint, onVoid }) {
+function History({ transactions, isOwner, search, setSearch, location, setLocation, cashier, setCashier, date, setDate, onPrint, onVoid, onVerify, onNotice }) {
   const { settings: printerSettings, status: printerStatus } = usePrinter();
   const [tab, setTab] = useState('all');
+  const [verifyingId, setVerifyingId] = useState(null);
+  const [verificationError, setVerificationError] = useState('');
+  const verifyPayment = async (transaction) => {
+    if (verifyingId !== null) return;
+    if (!window.confirm(`Verifikasi pembayaran QRIS ${transaction.receiptNo} atas nama ${transaction.customerName}? Pastikan dana ${formatCurrency(transaction.total)} sudah diterima.`)) return;
+    setVerifyingId(transaction.id);
+    setVerificationError('');
+    try {
+      await onVerify(transaction);
+      onNotice(`Pembayaran QRIS ${transaction.receiptNo} terverifikasi. Struk siap dicetak.`);
+    } catch (error) {
+      setVerificationError(error.message);
+    } finally {
+      setVerifyingId(null);
+    }
+  };
   const [dailyReport, setDailyReport] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [printError, setPrintError] = useState('');
@@ -1209,12 +1228,21 @@ function History({ transactions, isOwner, search, setSearch, location, setLocati
       } />
       <p className="history-print-help" id="daily-print-help">Cetak rekap semua transaksi {formatDate(`${printDate}T12:00:00+07:00`)} (WIB) ke printer thermal {printerSettings.paperWidth} mm sesuai pengaturan menu Printer. Rekap mencakup semua lokasi{isOwner ? ' dan kasir' : ' untuk akun ini'}, tanpa filter pencarian.</p>
       {printError && <div className="form-error" role="alert">{printError}</div>}
+      {verificationError && <div className="form-error" role="alert">{verificationError}</div>}
       {printMessage && <p className="printer-message" role="status">{printMessage}</p>}
       {dailyReport && <DailyTransactionReport {...dailyReport} isOwner={isOwner} paperWidth={printerSettings.paperWidth} onClose={closeDailyReport} onError={setPrintError} onComplete={completeDailyReport} />}
       <div className="history-tabs"><button aria-pressed={tab === 'all'} onClick={() => setTab('all')} className={tab === 'all' ? 'history-tab-active' : ''}>Semua <span>{countFor('all')}</span></button><button aria-pressed={tab === 'cafe'} onClick={() => setTab('cafe')} className={tab === 'cafe' ? 'history-tab-active' : ''}>Cafe <span>{countFor('cafe')}</span></button><button aria-pressed={tab === 'event'} onClick={() => setTab('event')} className={tab === 'event' ? 'history-tab-active' : ''}>Event <span>{countFor('event')}</span></button></div>
       <div className="panel history-panel">
         <div className="history-toolbar"><div className="search-input"><Search size={17} /><input aria-label="Cari transaksi" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Cari no. struk, nama, atau WhatsApp..." /></div><div className="filter-controls"><label className="select-filter"><Filter size={15} /><select aria-label="Filter lokasi transaksi" value={location} onChange={(event) => setLocation(event.target.value)}><option value="all">Semua lokasi</option><option value="cafe">Cafe</option><option value="event">Event</option></select><ChevronDown size={14} /></label>{isOwner && <label className="select-filter"><Users size={15} /><select aria-label="Filter kasir transaksi" value={cashier} onChange={(event) => setCashier(event.target.value)}><option value="all">Semua kasir</option><option value="kasir1">Kasir 1</option><option value="kasir2">Kasir 2</option></select><ChevronDown size={14} /></label>}<label className="date-filter"><CalendarDays size={15} /><input aria-label="Tanggal transaksi" type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label></div></div>
-        {filtered.length === 0 ? <EmptyState title="Transaksi tidak ditemukan" body={transactions.length ? 'Coba ubah kata kunci atau filter yang digunakan.' : 'Transaksi yang sudah dibuat akan muncul di sini.'} /> : <div className="table-wrap"><table className="history-table"><thead><tr><th>No. struk</th><th>Penyewa</th><th>Kamera & durasi</th><th>Lokasi</th>{isOwner && <th>Kasir</th>}<th>Pembayaran</th><th>Total</th><th>Status</th><th>Aksi</th></tr></thead><tbody>{filtered.map((transaction) => <tr key={transaction.id}><td><strong className="receipt-id">{transaction.receiptNo}</strong><small>{formatDate(transaction.createdAt)} · {transaction.startTime}</small></td><td><strong>{transaction.customerName}</strong><small>{transaction.customerWhatsapp}</small></td><td>{cameraSummary(transaction)}{transaction.isManualPrice && <span className="manual-flag">TARIF MANUAL</span>}</td><td><span className={`location-pill location-${transaction.location}`}>{transaction.location === 'cafe' ? 'Cafe' : 'Event'}</span></td>{isOwner && <td>{transaction.cashierName}<small>{transaction.cashierId}</small></td>}<td>{transaction.paymentMethod === 'cash' ? 'Tunai' : 'QRIS DANA'}{transaction.paymentMethod === 'qris_dana' && transaction.verifiedBy && <small>Diverifikasi {transaction.verifiedBy.split(' ')[0]}</small>}</td><td className="money-cell">{formatCurrency(transaction.total)}</td><td><StatusBadge transaction={transaction} /></td><td><div className="history-actions"><button className="table-action-button" disabled={transaction.paymentStatus !== 'paid'} onClick={() => onPrint(transaction)}><Printer size={14} /> Cetak ulang</button>{isOwner && transaction.paymentStatus !== 'void' && <button className="table-action-button table-void-button" onClick={() => onVoid(transaction)}><X size={13} /> Void</button>}</div></td></tr>)}</tbody></table></div>}
+        {filtered.length === 0 ? <EmptyState title="Transaksi tidak ditemukan" body={transactions.length ? 'Coba ubah kata kunci atau filter yang digunakan.' : 'Transaksi yang sudah dibuat akan muncul di sini.'} /> : <div className="table-wrap"><table className="history-table"><thead><tr><th>No. struk</th><th>Penyewa</th><th>Kamera & durasi</th><th>Lokasi</th>{isOwner && <th>Kasir</th>}<th>Pembayaran</th><th>Total</th><th>Status</th><th>Aksi</th></tr></thead><tbody>{filtered.map((transaction) => <tr key={transaction.id}><td><strong className="receipt-id">{transaction.receiptNo}</strong><small>{formatDate(transaction.createdAt)} · {transaction.startTime}</small></td><td><strong>{transaction.customerName}</strong><small>{transaction.customerWhatsapp}</small></td><td>{cameraSummary(transaction)}{transaction.isManualPrice && <span className="manual-flag">TARIF MANUAL</span>}</td><td><span className={`location-pill location-${transaction.location}`}>{transaction.location === 'cafe' ? 'Cafe' : 'Event'}</span></td>{isOwner && <td>{transaction.cashierName}<small>{transaction.cashierId}</small></td>}<td>{transaction.paymentMethod === 'cash' ? 'Tunai' : 'QRIS DANA'}{transaction.paymentMethod === 'qris_dana' && transaction.verifiedBy && <small>Diverifikasi {transaction.verifiedBy.split(' ')[0]}</small>}</td><td className="money-cell">{formatCurrency(transaction.total)}</td><td><StatusBadge transaction={transaction} /></td><td><div className="history-actions">
+          {transaction.paymentMethod === 'qris_dana' && transaction.paymentStatus === 'pending_verification' && (
+            <button className="table-action-button table-verify-button" type="button" onClick={() => verifyPayment(transaction)} disabled={verifyingId !== null} aria-busy={verifyingId === transaction.id}>
+              {verifyingId === transaction.id ? <><span className="button-spinner" aria-hidden="true" /> Memverifikasi...</> : <><BadgeCheck size={14} aria-hidden="true" /> Verifikasi pembayaran</>}
+            </button>
+          )}
+          <button className="table-action-button" disabled={transaction.paymentStatus !== 'paid'} onClick={() => onPrint(transaction)}><Printer size={14} /> Cetak ulang</button>
+          {isOwner && transaction.paymentStatus !== 'void' && <button className="table-action-button table-void-button" disabled={verifyingId === transaction.id} onClick={() => onVoid(transaction)}><X size={13} /> Void</button>}
+        </div></td></tr>)}</tbody></table></div>}
         <div className="table-footer"><span>Menampilkan <strong>{filtered.length}</strong> dari <strong>{transactions.length}</strong> transaksi termuat</span><span>Riwayat bersumber dari server</span></div>
       </div>
     </>

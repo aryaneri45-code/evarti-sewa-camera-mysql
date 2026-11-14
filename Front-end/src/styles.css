@@ -937,6 +937,8 @@ td small { color: var(--muted); font-size: 12px; }
 .select-filter select, .date-filter input { min-height: 40px; max-width: 140px; font-size: 13px; }
 .select-filter:focus-within, .date-filter:focus-within { outline: 3px solid var(--focus); outline-offset: 2px; }
 .table-action-button { min-height: 40px; color: var(--pink-dark); font-size: 12px; }
+.table-verify-button { min-height: 44px; color: white; background: var(--pink-dark); border-color: var(--pink-dark); white-space: nowrap; }
+.table-verify-button:not(:disabled):hover { background: var(--sidebar); border-color: var(--sidebar); }
 .table-void-button { color: var(--danger); }
 .history-table td { font-size: 13px; }
 .history-table th { font-size: 11px; }
